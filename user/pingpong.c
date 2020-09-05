@@ -38,6 +38,8 @@ int main(int argc, char** argv) {
 		if (n) {
 			printf("%d: received pong\n", getpid());
 		}
+		int status;
+		wait(&status);
 	}
 
 	exit(0);
