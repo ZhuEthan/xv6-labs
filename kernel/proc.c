@@ -106,6 +106,17 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  
+  //zhyisong: init kernel page
+  p->kpagetable = create_kpagetable();
+  // init process kstack
+  char* pa = kalloc();
+  if (pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  pt_kvmmap(p->kpagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+  
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -139,9 +150,15 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
+  //zhyisong
+  if(p->kpagetable)
+	free_pagetable(p->kpagetable);
+  p->kpagetable = 0;
+
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -215,7 +232,7 @@ userinit(void)
 
   p = allocproc();
   initproc = p;
-  
+
   // allocate one user page and copy init's instructions
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
@@ -273,6 +290,8 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+
+
   np->sz = p->sz;
 
   np->parent = p;
@@ -460,21 +479,28 @@ scheduler(void)
   struct cpu *c = mycpu();
   
   c->proc = 0;
+
+
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
     
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
+	  acquire(&p->lock);
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+		
+		//zhyisong: load the process's kernel page table into the core's satp register
+		init_kpagetable(p->kpagetable);
+
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
 
+		//printf("back to process\n");
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
@@ -485,11 +511,12 @@ scheduler(void)
     }
 #if !defined (LAB_FS)
     if(found == 0) {
+	  kvminithart();
       intr_on();
       asm volatile("wfi");
     }
 #else
-    ;
+	;
 #endif
   }
 }
