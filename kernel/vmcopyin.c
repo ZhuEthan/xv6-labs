@@ -63,3 +63,4 @@ copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
   return -1;
 }
+  //printf("va %p | pagetable %x | kpagetable %x\n", dst, walkaddr(myproc()->pagetable, (uint64)dst), walkaddr(myproc()->kpagetable, (uint64)dst));

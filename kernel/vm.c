@@ -206,9 +206,12 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
-    if((pte = walk(pagetable, a, 1)) == 0)
+    if((pte = walk(pagetable, a, 1)) == 0){
+		//printf("here it shouldn't come\n");
       return -1;
-    if(*pte & PTE_V)
+	}
+
+    if((*pte & PTE_V) && *pte >= 0xC00000)
       panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
@@ -431,6 +434,40 @@ uvmcopy(pagetable_t old, pagetable_t new, pagetable_t new_k, uint64 sz)
   return -1;
 }
 
+
+// Given a parent process's page table, copy
+// its memory into a child's page table.
+// Copies both the page table and the
+// physical memory.
+// returns 0 on success, -1 on failure.
+// frees any allocated pages on failure.
+int
+kvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("kvmcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("kvmcopy: page not present");
+	pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+	//printf("before mappages map %p\n", new);
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      goto err;
+    }
+	//printf("after mappages\n");
+  }
+  return 0;
+
+ err:
+  uvmunmap(new, 0, i / PGSIZE, 0);
+  return -1;
+}
+
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
 void
@@ -475,6 +512,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+ 
   /*uint64 n, va0, pa0;
 
   while(len > 0){
@@ -493,7 +531,9 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   }
 
   return 0;*/
-
+ if(srcva > 0xC000000) {
+	  return -1;
+  }
   return copyin_new(pagetable, dst, srcva, len);
 }
 
@@ -504,7 +544,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
+  /*uint64 n, va0, pa0;
   int got_null = 0;
 
   while(got_null == 0 && max > 0){
@@ -537,7 +577,12 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
-  }
+  }*/
+	if (srcva > 0xC000000) {
+		return -1;
+	}
+
+	return copyinstr_new(pagetable, dst, srcva, max);
 }
 
 

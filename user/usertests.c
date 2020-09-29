@@ -22,6 +22,8 @@
 char buf[BUFSZ];
 char name[3];
 
+int countfree();
+
 // what if you pass ridiculous pointers to system calls
 // that read user memory with copyin?
 void
@@ -63,6 +65,7 @@ copyin(char *s)
     }
     close(fds[0]);
     close(fds[1]);
+	//printf("free meme is %d\n", countfree());
   }
 }
 
@@ -928,6 +931,7 @@ forkforkfork(char *s)
     while(1){
       int fd = open("stopforking", 0);
       if(fd >= 0){
+		  //printf("fd greater than 0\n");
         exit(0);
       }
       if(fork() < 0){
@@ -935,13 +939,16 @@ forkforkfork(char *s)
       }
     }
 
+	printf("out of while loop\n");
     exit(0);
   }
 
   sleep(20); // two seconds
+  printf("sleep 20s at parent");
   close(open("stopforking", O_CREATE|O_RDWR));
   wait(0);
   sleep(10); // one second
+  printf("sleep 10s at parent\n");
 }
 
 // regression test. does reparent() violate the parent-then-child
@@ -2245,7 +2252,9 @@ bigargtest(char *s)
     for(i = 0; i < MAXARG-1; i++)
       args[i] = "bigargs test: failed\n                                                                                                                                                                                                       ";
     args[MAXARG-1] = 0;
+	printf("before echo\n");
     exec("echo", args);
+	printf("after echo\n");
     fd = open("bigarg-ok", O_CREATE);
     close(fd);
     exit(0);
@@ -2511,8 +2520,9 @@ execout(char *s)
 
       // free a few pages, in order to let exec() make some
       // progress.
-      for(int i = 0; i < avail; i++)
+      for(int i = 0; i < avail; i++){
         sbrk(-4096);
+	  }
       
       close(1);
       char *args[] = { "echo", "x", 0 };
@@ -2553,6 +2563,7 @@ countfree()
     close(fds[0]);
     
     while(1){
+		//printf("sbrk\n");
       uint64 a = (uint64) sbrk(4096);
       if(a == 0xffffffffffffffff){
         break;
@@ -2573,6 +2584,7 @@ countfree()
 
   close(fds[1]);
 
+  //printf("before read\n");
   int n = 0;
   while(1){
     char c;
@@ -2728,6 +2740,7 @@ main(int argc, char *argv[])
   int fail = 0;
   for (struct test *t = tests; t->s != 0; t++) {
     if((justone == 0) || strcmp(t->s, justone) == 0) {
+		//printf("justone %s\n", t->s);
       if(!run(t->f, t->s))
         fail = 1;
     }
@@ -2738,6 +2751,7 @@ main(int argc, char *argv[])
     exit(1);
   } else if((free1 = countfree()) < free0){
     printf("FAILED -- lost some free pages %d (out of %d)\n", free1, free0);
+	printf("countfree again() %d\n", countfree());
     exit(1);
   } else {
     printf("ALL TESTS PASSED\n");

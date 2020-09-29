@@ -20,7 +20,10 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
-  pagetable_t kpagetable = p->kpagetable;
+  pagetable_t newkpagetable = 0; 
+  int is_copy = 0;
+  uint64 r_sz = 0;
+  uint64 clean_sz = 0;
 
   begin_op();
 
@@ -40,7 +43,20 @@ exec(char *path, char **argv)
     goto bad;
 
   //zhyisong
-  uvmunmap(kpagetable, 0, PGROUNDUP(p->sz)/PGSIZE, 0);
+  r_sz = p->sz;
+  clean_sz = r_sz;
+  if ((newkpagetable = uvmcreate()) == 0)
+	  goto bad;
+  //printf("after uvmcreate\n");
+
+  if(kvmcopy(p->kpagetable, newkpagetable, r_sz) == -1) {
+	  //printf("kvmcopy go to bad");
+	  goto bad;
+  }
+  is_copy = 1;
+  uvmunmap(p->kpagetable, 0, PGROUNDUP(r_sz)/PGSIZE, 0);
+
+  /*printf("after kvmcopy\n");*/
 
   // Load program into memory.
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
@@ -53,9 +69,10 @@ exec(char *path, char **argv)
     if(ph.vaddr + ph.memsz < ph.vaddr)
       goto bad;
     uint64 sz1;
-    if((sz1 = uvmalloc(pagetable, kpagetable, sz, ph.vaddr + ph.memsz)) == 0)
+    if((sz1 = uvmalloc(pagetable, p->kpagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
     sz = sz1;
+	clean_sz = sz;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
     if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
@@ -71,13 +88,19 @@ exec(char *path, char **argv)
   // Allocate two pages at the next page boundary.
   // Use the second as the user stack.
   sz = PGROUNDUP(sz);
+  clean_sz = sz;
   uint64 sz1;
-  if((sz1 = uvmalloc(pagetable, kpagetable, sz, sz + 2*PGSIZE)) == 0)
+  if((sz1 = uvmalloc(pagetable, p->kpagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
+
+
   sz = sz1;
+  clean_sz = sz;
   uvmclear(pagetable, sz-2*PGSIZE);
+  uvmclear(p->pagetable, sz-2*PGSIZE);
   sp = sz;
   stackbase = sp - PGSIZE;
+
 
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
@@ -85,8 +108,11 @@ exec(char *path, char **argv)
       goto bad;
     sp -= strlen(argv[argc]) + 1;
     sp -= sp % 16; // riscv sp must be 16-byte aligned
-    if(sp < stackbase)
+    if(sp < stackbase){
+		//printf("under stackbase\n");
       goto bad;
+	}
+
     if(copyout(pagetable, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
       goto bad;
     ustack[argc] = sp;
@@ -111,8 +137,10 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
-    
+  
   // Commit to the user image.
+  printf("I am here\n");
+ 
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
   p->sz = sz;
@@ -120,6 +148,8 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+  free_pagetable(newkpagetable);
+ 
   vmprint(pagetable);
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
@@ -130,6 +160,18 @@ exec(char *path, char **argv)
   if(ip){
     iunlockput(ip);
     end_op();
+  }
+  if(newkpagetable) {
+	//printf("come to bad newkpagetable\n");
+	if (is_copy) {
+		//printf("copy already\n");
+		uvmunmap(p->kpagetable, 0, PGROUNDUP(clean_sz)/PGSIZE, 0);
+		if (kvmcopy(newkpagetable, p->kpagetable, r_sz) == -1) {
+		goto bad;
+		}
+	}
+	//free_pagetable(newkpagetable);
+	free_pagetable(newkpagetable);
   }
   return -1;
 }

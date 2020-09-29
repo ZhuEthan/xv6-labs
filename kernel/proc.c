@@ -155,9 +155,11 @@ freeproc(struct proc *p)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
   //zhyisong
-  if(p->kpagetable)
+  if(p->kpagetable) {
+	uvmunmap(p->kpagetable, p->kstack, 1, 1);
 	free_pagetable(p->kpagetable);
-  p->kpagetable = 0;
+	p->kpagetable = 0;
+  }
 
   p->sz = 0;
   p->pid = 0;
@@ -255,18 +257,27 @@ userinit(void)
 int
 growproc(int n)
 {
-  uint sz;
+  uint sz, ksz;
   struct proc *p = myproc();
 
   sz = p->sz;
+  if (sz+n >= 0xC000000 || sz+n < 0) {
+	  printf("exceed upper limit\n");
+	  return -1;
+  }
+
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, p->kpagetable, sz, sz + n)) == 0) {
       return -1;
     }
   } else if(n < 0) {
     sz = uvmdealloc(p->pagetable, sz, sz + n);
-	sz = kvmdealloc(p->kpagetable, sz, sz + n);
+	ksz = kvmdealloc(p->kpagetable, p->sz, p->sz + n);
+	if (ksz != sz) {
+		panic("kernel space dealloc is different from user space");
+	}
   }
+
   p->sz = sz;
   return 0;
 }
